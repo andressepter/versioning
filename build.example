@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# opts 
+  while getopts v: flag
+  do
+    case "${flag}" in
+      v) version=${OPTARG};;
+    esac
+  done
+  
+  version=${version//\//_}
+  echo "Build Version: $version"
+
+  #Variables
+  SOURCE_REGISTRY="${CI_REGISTRY_URI}/dockerhub/library"
+  SOURCE_IMAGE_NAME="alpine"
+  SOURCE_IMAGE_TAG="FIXME"
+  SOURCE_IMAGE="${SOURCE_REGISTRY}/${SOURCE_IMAGE_NAME}:${SOURCE_IMAGE_TAG}"
+  TARGET_REGISTRY="${CI_REGISTRY_URI}/${CI_PROJECT_PATH}"
+  TARGET_IMAGE_NAME="alpine"
+  TARGET_IMAGE_TAG_PREFIX="EDITME"
+  TARGET_IMAGE="${TARGET_REGISTRY}/${TARGET_IMAGE_NAME}:${TARGET_IMAGE_TAG_PREFIX}-${version}"
+
+  # annotations 
+  org_opencontainers_image_created="org.opencontainers.image.created=$(date)"
+  org_opencontainers_image_authors="org.opencontainers.image.authors=EDITME"
+  org_opencontainers_image_url="org.opencontainers.image.url=${TARGET_IMAGE}"
+  org_opencontainers_image_documentation="org.opencontainers.image.documentation=EDITME"
+  org_opencontainers_image_source="org.opencontainers.image.source=${SOURCE_IMAGE}"
+  org_opencontainers_image_version="org.opencontainers.image.version=${version}"
+  org_opencontainers_image_title="placeholder_value"
+  org_opencontainers_image_description="placeholder_value"
+
+  #Initial build to get versions from
+  docker build --build-arg SOURCEIMAGE=${SOURCE_IMAGE} -t ${TARGET_IMAGE} .
+  
+  #Generate label info from built container
+  org_opencontainers_image_title="org.opencontainers.image.title="$(docker run --rm -t ${TARGET_IMAGE} /bin/sh -c "cat /etc/*-release | tr '\n' ' '")
+  org_opencontainers_image_description="org.opencontainers.image.description="$(docker run --rm -t ${TARGET_IMAGE} /bin/sh -c "/usr/sbin/haproxy -v | grep version | tr '\n' ' '")
+  
+  #Build and push image with relevant labels
+  docker login -u ${CI_HARBOR_API_USER} -p ${CI_HARBOR_API_KEY} ${CI_REGISTRY_URI}
+# saab kasutada veaotsingul
+set -x 
+
+# NB! backslashitud ridade ees ei tohi olla tyhikud! backslashi j2rel ei tohi olla tyhikut
+
+case $version in
+    *-release-* )
+      docker buildx build --build-arg SOURCEIMAGE=${SOURCE_IMAGE} -t ${TARGET_IMAGE} -t "${TARGET_REGISTRY}/${TARGET_IMAGE_NAME}:latest" \
+--label "${org_opencontainers_image_authors}" \
+--label "${org_opencontainers_image_created}" \
+--label "${org_opencontainers_image_url}" \
+--label "${org_opencontainers_image_documentation}" \
+--label "${org_opencontainers_image_source}" \
+--label "${org_opencontainers_image_version}" \
+--label "${org_opencontainers_image_title}" \
+--label "${org_opencontainers_image_description}" \
+--push . 
+      ;;
+    * )
+      docker buildx build --build-arg SOURCEIMAGE="${SOURCE_IMAGE}" -t "${TARGET_IMAGE}" \
+--label "${org_opencontainers_image_authors}" \
+--label "${org_opencontainers_image_created}" \
+--label "${org_opencontainers_image_url}" \
+--label "${org_opencontainers_image_documentation}" \
+--label "${org_opencontainers_image_source}" \
+--label "${org_opencontainers_image_version}" \
+--label "${org_opencontainers_image_title}" \
+--label "${org_opencontainers_image_description}" \
+--push . 
+      ;;
+esac
+#veaotsingu lopp
+set +x 

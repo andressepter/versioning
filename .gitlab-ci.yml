@@ -1,0 +1,201 @@
+# auto-SemVer for PTO v24.10.03
+#
+# Requires:
+#
+# - Access Token (Maintainer, read_repository, write_repository)
+# - $CIV_PROJECT_TOKEN (Protected, Masked) from Access Token
+#
+# Usage:
+#
+# SNAPSHOT build version on [upgrade|feature|patch]/<label> branch:
+# git describe --tags --match="${RELEASE_TAG_PATTERN}" --exclude='*-*-merged'
+# gives v<semver>-<branch>[-<distance>-g<commit_hash>]
+#
+# PROD build version on default branch:
+# git describe --tags --exact-match --match="${RELEASE_TAG_PATTERN}" --exclude='*-*'
+# gives v<semver>
+#
+# Resuming normal Ops after manual hacks - add v<semver> to required (latest?) commit on default branch manually
+
+# #TODO: check against defined variables:BRANCH_TYPE:options
+
+stages:
+  - branch
+  - merge-post
+  - build
+  
+variables:
+  GIT_DEPTH: 100
+  GIT_STRATEGY: none
+  RELEASE_TAG_PATTERN: v*[0-9]\.*[0-9]\.*[0-9]
+  BRANCH_TYPE:
+    value: "patch"
+    options:
+      - "upgrade"
+      - "feature"
+      - "patch"
+    description: "v<major>.<minor>.<patch> - upgrade: major + 1, feature: minor + 1, patch: patch + 1"
+  BRANCH_LABEL:
+    value: new
+    description: "branch name <branch_type>/<branch_label> must be unique"
+  DRY_RUN:
+    value: "no"
+    options:
+      - "no"
+      - "yes"
+    description: "no: push origin, yes: no action"
+
+.job-pre:
+  before_script:
+    # variables ---
+    - echo ${GIT_DEPTH}
+    - echo ${BRANCH_TYPE}
+    - echo ${BRANCH_LABEL}
+    - echo ${DRY_RUN}
+    - export
+    # cleanup ---
+    - cd ~
+    - rm -rf "$(dirname "$CI_PROJECT_DIR")/$(basename "$CI_PROJECT_DIR")"
+
+    #use proj. token as ci variable, consider moving it to vault! 
+    # refactor proxy variable, strip https!!! 
+    - git clone --depth $GIT_DEPTH https://$GITLAB_USER_LOGIN:$CI_PROJECT_TOKEN@${CI_SERVER_URL#*//}/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME.git $CI_PROJECT_DIR
+    - cd $CI_PROJECT_DIR
+    - git fetch origin $CI_COMMIT_REF_NAME
+    - git checkout $CI_COMMIT_SHA
+    - git config --global user.name "${GITLAB_USER_NAME}"
+    - git config --global user.email "${GITLAB_USER_EMAIL}"
+
+job-branch:
+  stage: branch
+  extends:
+    - .job-pre
+  script:
+    # latest version ---
+    - tag_latest=$(git describe --tags --abbrev=0 --match="${RELEASE_TAG_PATTERN}" --exclude="*-*")
+    - tag_latest_distance=$(git describe --tags --match "${RELEASE_TAG_PATTERN}" --exclude="*-*" | awk -F'-' '{print $2}')
+    - echo "${tag_latest_distance}/${GIT_DEPTH}"
+    - |-
+      if [[ "$tag_latest_distance" == "" ]]; then
+        echo "WARNING - No distance to latest tag"
+      fi
+    - version_latest=$(echo "${tag_latest#v}" | awk -F'-' '{print $1}')
+    - echo "${version_latest}"
+    # new tag ---
+    - tag_new="v${version_latest}-${BRANCH_TYPE}/${BRANCH_LABEL}"
+    - git tag "${tag_new}"
+    - echo "${tag_new}"
+    - git describe --tags --abbrev=0
+    # new branch ---
+    - branch_new="${BRANCH_TYPE}/${BRANCH_LABEL}"
+    - echo "main -> ${branch_new}"
+    - git checkout -b "${branch_new}" "${tag_new}"
+    # push origin ---
+    - |-
+      if [[ "$DRY_RUN" == "no" ]]; then
+        git push origin "${branch_new}"
+      fi
+    - |-
+      if [[ "$DRY_RUN" == "no" ]]; then
+        git push origin ${tag_new}
+      fi
+  rules:
+    - if: ($CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH)
+  when: manual
+  tags:
+    - shell
+
+job-merge-post:
+  stage: merge-post
+  extends:
+    - .job-pre
+  script:
+    # new version ---
+    - tag_latest=$(git describe --tags --abbrev=0 --match="${RELEASE_TAG_PATTERN}" --exclude="*-*")
+    - version_latest="${tag_latest#v}"
+    - echo "$version_latest"
+    - commit_branch_type=$(echo "$CI_COMMIT_MESSAGE" | head -n 1 | awk -F'/' '{print $1}')
+    - echo "$commit_branch_type"
+    - commit_branch_label=$(echo "$CI_COMMIT_MESSAGE" | head -n 1 | awk '{print $1}' | awk -F'/' '{print $2}')
+    - echo "${commit_branch_label}"
+    - |-
+      version_latest_major=$(echo ${version_latest} | cut -d '.' -f1)
+      version_latest_minor=$(echo ${version_latest} | cut -d '.' -f2)
+      version_latest_patch=$(echo ${version_latest} | cut -d '.' -f3)
+    - |-
+      case "${commit_branch_type}" in
+        "upgrade")
+          version_new_major=$((version_latest_major + 1))
+          version_new_minor=0
+          version_new_patch=0
+          ;;
+        "feature")
+          version_new_major=$version_latest_major
+          version_new_minor=$((version_latest_minor + 1))
+          version_new_patch=0
+          ;;
+        "patch")
+          version_new_major=$version_latest_major
+          version_new_minor=$version_latest_minor
+          version_new_patch=$((version_latest_patch + 1))
+          ;;
+      esac
+    - version_new="${version_new_major}.${version_new_minor}.${version_new_patch}"
+    - echo "$version_new"
+    # new branch merged tag ---
+    - tag_branch_merged_new="v${version_latest}-${commit_branch_type}/${commit_branch_label}-merged"
+    - git tag "${tag_branch_merged_new}"
+    - echo "${tag_branch_merged_new}"
+    - git describe --tags --abbrev=0 
+    # push origin ---
+    - git push origin ${tag_branch_merged_new}
+    # new version tag ---
+    - tag_version_new="v$version_new"
+    - git tag "${tag_version_new}"
+    - echo "${tag_version_new}"
+    - git describe --tags --abbrev=0
+    # push origin ---
+    - git push origin ${tag_version_new}
+  rules:
+    - if: ($CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH) && ($CI_PIPELINE_SOURCE == "push") && ($CI_COMMIT_MESSAGE =~ /^\w+\/\w+ merged into \w+/m)
+    #- if: ($CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH) && ($CI_PIPELINE_SOURCE == "push")
+  tags:
+    - shell
+
+job-build:
+  stage: build
+  extends:
+    - .job-pre
+  script:
+    - echo $CI_DEFAULT_BRANCH
+    - echo $CI_COMMIT_BRANCH
+    - echo $CI_COMMIT_REF_NAME
+    - echo $CI_COMMIT_TAG    
+    - commit_branch_type_from_branch=$(echo "$CI_COMMIT_BRANCH" | head -n 1 | awk -F'/' '{print $1}')
+    - commit_branch_type_from_ref_name=$(echo "$CI_COMMIT_REF_NAME" | awk -F'/' '{print $1}' | awk -F'-' '{print $2}')
+    - commit_branch_type_from_tag=$(echo "$CI_COMMIT_TAG" | awk -F'/' '{print $1}' | awk -F'-' '{print $2}')
+    - commit_branch_type=${commit_branch_type_from_branch:-${commit_branch_type_from_ref_name:-${commit_branch_type_from_tag:-${CI_DEFAULT_BRANCH}}}}
+    - echo "$commit_branch_type"
+    - |-
+      if [[ "${commit_branch_type}" == "${CI_DEFAULT_BRANCH}" ]]; then
+        echo "default branch"
+        tag_latest=$(git describe --tags --exact-match --match="${RELEASE_TAG_PATTERN}" --exclude='*-*')
+        version_latest="${tag_latest#v}-release-g${CI_COMMIT_SHORT_SHA}"
+        echo ${version_latest}
+        chmod +x ./build.sh
+        ./build.sh -v "${version_latest}"
+      elif [[ "${commit_branch_type}" == "upgrade" || "${commit_branch_type}" == "feature" || "${commit_branch_type}" == "patch" ]]; then #TODO
+        echo "dev branch"
+        tag_latest=$(git describe --tags --match="${RELEASE_TAG_PATTERN}" --exclude='*-*-merged')
+        #version_latest="${tag_latest#v}"
+        version_latest="${tag_latest}"
+        echo ${version_latest}
+        chmod +x ./build.sh
+        ./build.sh -v "${version_latest}"
+      else
+        echo "unknown branch"
+        exit 1
+      fi
+  when: manual
+  tags:
+    - shell
