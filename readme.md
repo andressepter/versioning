@@ -1,8 +1,22 @@
+Automaatne Semantiline versioneerimine
+
+Eeldused: antud koodi kasutamiseks on vajalik seadistatud versioneerimise ja CI/CD keskkond nt. gitlab-gitlabrunner-registry kooslus
+
 ÜLDISED NÕUDED (koodi oma projektis kasutamiseks)
+
+Pipeline muutujad seada:
+vaata build.example sektsiooni #Variables
++
+CI_HARBOR_API_USER
+CI_HARBOR_API_KEY
+CI_REGISTRY_URI
+
+
+
 
 Branchimine:
 1. Main branch peab olema "protected branch" sinna EI TOHI commite teha, merge on lubatud ainult haldurile ja protsess on eelnevalt kokku lepitud. 
-2. Kõikide muudatuste loomiseks tuleb luua arendusbranch ja pärast muuta (vt. ka Confluence "versioneerimine"). Branchi nimes EI TOHI olla tühikut. 
+2. Kõikide muudatuste loomiseks tuleb luua arendusbranch ja pärast muuta Branchi nimes EI TOHI olla tühikut. 
 3. Branchida tohib AINULT viimase "release" main haru pealt. Ajaloos tagasi liikumiseks tee uus projekt või kopeeri vana haru kood uude branchi!
 4. Uue projekti versioonimisega alustamiseks tuleb lisada uus haru "versioning", lisada main branchi tag 0.0.0 ja tööd teha harus "versioning" 
    * integreerida "Projektis millega töötatakse" peatükis toodud muudatused
@@ -20,7 +34,7 @@ Projektis millega töötatakse (versioneerimise intgreerimine):
 1. Kontrolli, et "main" haru oleks "protected" Settings > Repository > Protected branches. Allowed to merge: ja Allowed to push and merge: tuleb panna Maintainers
 2. Loo "project access token" : Settings > Access tokens - NB! need aeguvad hiljemalt aastaga.
 2. Kopeeri CI muutujate alla, nt. CI_PROJECT_TOKEN
-3. kontrolli, kas GENEERIKUTE grupimuutujad on sul projekti kaasa tulnud (vajalik build blokis)
+3. kontrolli, kas kõik vajalikud CI muutujad on seatud
 4. Häälesta merge requesti seaded 
   * Projekti seaded: Settings > Merge requests
   * valida "Merge commit with semi-linear history"
@@ -31,7 +45,7 @@ Projektis millega töötatakse (versioneerimise intgreerimine):
   ```
 5. Projektile määrata ci/cd runner. "shell" tagiga shell runner
 6. Seadista projektile versioning projektist konveieri ci_cd väljakutse
-  * settings ci/cd > "general pipelines" > ci/cd config ".gitlab-ci.yml@geneerikud/platvormid/versioning"
+  * settings ci/cd > "general pipelines" > ci/cd config ".gitlab-ci.yml@[SINU VERSIONEERIMISE KOODI REPO]"
  
 
 Kasutamine:
